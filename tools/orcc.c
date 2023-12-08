@@ -19,6 +19,7 @@ void output_code_test (OrcProgram *p, FILE *output);
 void output_code_backup (OrcProgram *p, FILE *output);
 void output_code_no_orc (OrcProgram *p, FILE *output);
 void output_code_assembly (OrcProgram *p, FILE *output);
+void output_machine_code (OrcProgram *p, FILE *output);
 void output_code_execute (OrcProgram *p, FILE *output, int is_inline);
 void output_program_generation (OrcProgram *p, FILE *output, int is_inline);
 void output_init_function (FILE *output);
@@ -54,6 +55,7 @@ typedef enum {
   MODE_HEADER,
   MODE_TEST,
   MODE_ASSEMBLY,
+  MODE_BINARY,
   MODE_PARSE
 } OrcMode;
 
@@ -74,6 +76,7 @@ void help (void)
   fprintf(stderr, "  --header                Produce C header for functions\n");
   fprintf(stderr, "  --test                  Produce test code for functions\n");
   fprintf(stderr, "  --assembly              Produce assembly code for functions\n");
+  fprintf(stderr, "  --binary                Produce raw machine code for functions\n");
   fprintf(stderr, "  --include FILE          Add #include <FILE> to code\n");
   fprintf(stderr, "  --target TARGET         Generate assembly for TARGET\n");
   fprintf(stderr, "  --compat VERSION        Generate code compatible with Orc version VERSION\n");
@@ -125,6 +128,8 @@ main (int argc, char *argv[])
       mode = MODE_TEST;
     } else if (strcmp(argv[i], "--assembly") == 0) {
       mode = MODE_ASSEMBLY;
+    } else if (strcmp(argv[i], "--binary") == 0) {
+      mode = MODE_BINARY;
     } else if (strcmp(argv[i], "--parse-only") == 0) {
       mode = MODE_PARSE;
     } else if (strcmp(argv[i], "--include") == 0) {
@@ -210,7 +215,7 @@ main (int argc, char *argv[])
     exit (1);
   }
 
-  if (mode == MODE_ASSEMBLY && orc_target_get_by_name (target) == NULL) {
+  if ((mode == MODE_ASSEMBLY || mode == MODE_BINARY) && orc_target_get_by_name (target) == NULL) {
     fprintf(stderr, "Unknown target \"%s\"\n", target);
     exit (1);
   }
@@ -249,6 +254,7 @@ main (int argc, char *argv[])
         output_file = "out_test.c";
         break;
       case MODE_ASSEMBLY:
+      case MODE_BINARY:
         output_file = "out.s";
         break;
       case MODE_PARSE:
@@ -299,6 +305,7 @@ main (int argc, char *argv[])
   }
 
   output = fopen (output_file, "w");
+
   if (!output) {
     fprintf(stderr, "Could not write output file: %s\n", output_file);
     exit(1);
@@ -443,10 +450,34 @@ main (int argc, char *argv[])
     fprintf(output, "  };\n");
     fprintf(output, "  return 0;\n");
     fprintf(output, "}\n");
-  } else if (mode == MODE_ASSEMBLY) {
+  } else if (mode == MODE_ASSEMBLY || mode == MODE_BINARY) {
     fprintf(output, "%s", orc_target_get_asm_preamble (target));
     for(i=0;i<n_programs;i++){
       output_code_assembly (programs[i], output);
+    }
+    if (mode == MODE_BINARY) {
+      // Binary mode outputs codegen for each program ("function") separately.
+
+      for (i = 0; i < n_programs; i++) {
+        char output_file[255] = { 0 };
+        const OrcTarget *const t = orc_target_get_by_name (target);
+        const int l = snprintf (output_file, 255, "%s_%s.bin", programs[i]->name,
+            t->name);
+        ORC_ASSERT (l > 0);
+        FILE *output = fopen (output_file, "wb");
+
+        if (!output) {
+          fprintf (stderr, "Could not write output file: %s\n", output_file);
+          break;
+        }
+
+        output_machine_code (programs[i], output);
+        fclose (output);
+      }
+
+      if (error) {
+        remove (output_file);
+      }
     }
   }
 
@@ -891,7 +922,7 @@ output_code_execute (OrcProgram *p, FILE *output, int is_inline)
       fprintf(output, "  OrcProgram *p;\n");
     }
   }
-  fprintf(output, "  void (*func) (OrcExecutor *);\n");
+  fprintf(output, "  OrcExecutorFunc func = NULL;\n");
   fprintf(output, "\n");
   if (use_lazy_init) {
     if (use_code) {
@@ -1291,6 +1322,7 @@ output_code_test (OrcProgram *p, FILE *output)
   fprintf(output, "  {\n");
   fprintf(output, "    OrcProgram *p = NULL;\n");
   fprintf(output, "    int ret;\n");
+  fprintf(output, "    int flags = ORC_TEST_SKIP_RESET;");
   fprintf(output, "\n");
   fprintf(output, "    if (!quiet)");
   fprintf(output, "      printf (\"%s:\\n\");\n", p->name);
@@ -1434,32 +1466,39 @@ output_code_test (OrcProgram *p, FILE *output)
     fprintf(output, "\n");
   }
   if (use_backup) {
-    fprintf(output, "    ret = orc_test_compare_output_backup (p);\n");
-    fprintf(output, "    if (!ret) {\n");
+    fprintf(output, "    ret = orc_test_compare_output_full (p, ORC_TEST_FLAGS_BACKUP | flags);\n");
+    fprintf(output, "    if (ret == ORC_TEST_INDETERMINATE) {\n");
+    fprintf(output, "      printf (\"    compiled function:   COMPILE FAILED (%%s)\\n\", p->error_msg);\n");
+    fprintf(output, "    } else if (!ret) {\n");
     fprintf(output, "      error = TRUE;\n");
+    fprintf(output, "      printf (\"    backup function:   FAILED\\n\");\n");
     fprintf(output, "    } else if (!quiet) {\n");
     fprintf(output, "      printf (\"    backup function  :   PASSED\\n\");\n");
     fprintf(output, "    }\n");
     fprintf(output, "\n");
     if (compat >= ORC_VERSION(0,4,7,1)) {
       fprintf(output, "    if (benchmark) {\n");
+      fprintf(output, "      orc_program_reset (p);");
       fprintf(output, "      printf (\"    cycles (backup)  :   %%g\\n\",\n");
       fprintf(output, "          orc_test_performance_full (p, ORC_TEST_FLAGS_BACKUP, NULL));\n");
       fprintf(output, "    }\n");
       fprintf(output, "\n");
     }
   }
-  fprintf(output, "    ret = orc_test_compare_output (p);\n");
+  fprintf(output, "    orc_program_reset (p);");
+  fprintf(output, "    ret = orc_test_compare_output_full (p, flags);\n");
   fprintf(output, "    if (ret == ORC_TEST_INDETERMINATE && !quiet) {\n");
-  fprintf(output, "      printf (\"    compiled function:   COMPILE FAILED\\n\");\n");
+  fprintf(output, "      printf (\"    compiled function:   COMPILE FAILED(%%s)\\n\", p->error_msg);\n");
   fprintf(output, "    } else if (!ret) {\n");
   fprintf(output, "      error = TRUE;\n");
+  fprintf(output, "      printf (\"    compiled function:   FAILED\\n\");\n");
   fprintf(output, "    } else if (!quiet) {\n");
   fprintf(output, "      printf (\"    compiled function:   PASSED\\n\");\n");
   fprintf(output, "    }\n");
   fprintf(output, "\n");
   if (compat >= ORC_VERSION(0,4,7,1)) {
     fprintf(output, "    if (benchmark) {\n");
+    fprintf(output, "      orc_program_reset (p);");
     fprintf(output, "      printf (\"    cycles (compiled):   %%g\\n\",\n");
     fprintf(output, "          orc_test_performance_full (p, 0, NULL));\n");
     fprintf(output, "    }\n");
@@ -1492,6 +1531,20 @@ output_code_assembly (OrcProgram *p, FILE *output)
   }
   fprintf(output, "\n");
 
+}
+
+void
+output_machine_code (OrcProgram *p, FILE *output)
+{
+  OrcTarget *const t = orc_target_get_by_name(target);
+
+  const OrcCompileResult result = orc_program_compile_for_target (p, t);
+  if (ORC_COMPILE_RESULT_IS_SUCCESSFUL(result)) {
+    fwrite (p->orccode->code, sizeof(unsigned char), p->orccode->code_size, output);
+  } else {
+    fprintf(stderr, "Failed to compile assembly for '%s'\n", p->name);
+    error = TRUE;
+  }
 }
 
 static const char *
