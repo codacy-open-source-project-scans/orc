@@ -198,6 +198,9 @@ void emulate_convdl (OrcOpcodeExecutor *ex, int i, int n);
 void emulate_convld (OrcOpcodeExecutor *ex, int i, int n);
 void emulate_convfd (OrcOpcodeExecutor *ex, int i, int n);
 void emulate_convdf (OrcOpcodeExecutor *ex, int i, int n);
+void emulate_orf (OrcOpcodeExecutor *ex, int i, int n);
+void emulate_andf (OrcOpcodeExecutor *ex, int i, int n);
+void emulate_convwf (OrcOpcodeExecutor *ex, int offset, int n);
 
 #endif
 
