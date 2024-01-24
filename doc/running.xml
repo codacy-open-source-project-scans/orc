@@ -5,7 +5,7 @@
 %version-entities;
 <!ENTITY % local.common.attrib "xmlns:xi  CDATA  #FIXED 'http://www.w3.org/2003/XInclude'">
 ]>
-<refentry id="orc-runninging" revision="10 jan 2011">
+<refentry id="orc-running" revision="20 jan 2024">
 <refmeta>
 <refentrytitle>Running Orc Applications</refentrytitle>
 <manvolnum>3</manvolnum>
@@ -46,6 +46,17 @@ At runtime several environment variables can be used to control ORC.
     functions. Selecting 'emulate' will run the ORC code through an interpreter.
     Using 'debug' enables debuggers such as gdb to create useful backtraces from
     ORC-generated code
+  </para>
+</formalpara>
+
+<formalpara id="ORC_TARGET">
+  <title><envar>ORC_TARGET</envar></title>
+
+  <para>
+    This environment variable can be used to override the default target
+    selection and force a specific target such as "sse" or "avx".
+    This can be useful for benchmarking purposes, e.g. to compare SSE vs. AVX
+    targets, or to work around bugs. Available since Orc 0.4.35.
   </para>
 </formalpara>
 
