@@ -28,6 +28,13 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
+
+#include <fcntl.h>
+
+#ifdef _MSC_VER
+#  include <intrin.h>
+#endif
+
 #include <orc/orcdebug.h>
 #include <orc/orcsse.h>
 #include <orc/orcmmx.h>
@@ -35,13 +42,6 @@
 #include <orc/orcutils.h>
 
 #include "orcinternal.h"
-
-#include <fcntl.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <time.h>
-
 
 int orc_x86_sse_flags;
 int orc_x86_mmx_flags;
@@ -207,8 +207,9 @@ static void
 orc_x86_detect_cpuid (void)
 {
   static int inited = 0;
-  orc_uint32 ebx, edx;
-  orc_uint32 level;
+  orc_uint32 ebx = 0;
+  orc_uint32 edx = 0;
+  orc_uint32 level = 0;
 
   if (inited) return;
   inited = 1;
@@ -490,7 +491,10 @@ orc_sse_detect_cpuid_intel (orc_uint32 level)
 static void
 orc_sse_detect_cpuid_amd (orc_uint32 level)
 {
-  orc_uint32 eax, ebx, ecx, edx;
+  orc_uint32 eax = 0;
+  orc_uint32 ebx = 0;
+  orc_uint32 ecx = 0;
+  orc_uint32 edx = 0;
 
   if (level >= 1) {
     orc_x86_cpuid_handle_standard_flags ();
