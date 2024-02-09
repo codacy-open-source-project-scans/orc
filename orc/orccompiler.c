@@ -7,7 +7,14 @@
 #include <stdarg.h>
 
 #ifdef __APPLE__
-  #include <pthread.h>
+#include <pthread.h>
+
+#include <AvailabilityMacros.h>
+#include <TargetConditionals.h>
+
+#if TARGET_OS_OSX
+#include <libkern/OSCacheControl.h>
+#endif
 #endif
 
 #if defined(HAVE_CODEMEM_VIRTUALALLOC)
@@ -64,17 +71,6 @@ int _orc_compiler_flag_randomize;
 
 /* For Windows */
 int _orc_codemem_alignment;
-
-#if defined(MAC_OS_VERSION_11_0) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_11_0
-G_ALWAYS_INLINE
-static void
-orc_pthread_jit_write_protect_np (int protect)
-{
-  if (__builtin_available (macOS 11.0, *))
-    if (pthread_jit_write_protect_supported_np ())
-      pthread_jit_write_protect_np (protect);
-}
-#endif
 
 void
 _orc_compiler_init (void)
@@ -193,9 +189,11 @@ orc_compiler_allocate_register (OrcCompiler *compiler, int data_reg)
   // Use ORC_N_REGS to ensure forward proofed iteration
   for (i = 0; i < ORC_N_REGS; i++) {
     // Try with up to 64 registers starting from offset
+    // If this lands us within vector range, bail out
     reg = offset + ((roff + i) & 0x3f);
-    if (compiler->valid_regs[reg] &&
-        compiler->alloc_regs[reg] == 0) {
+    if (reg >= compiler->target->data_register_offset && !data_reg)
+      break;
+    if (compiler->valid_regs[reg] && compiler->alloc_regs[reg] == 0) {
       compiler->alloc_regs[reg]++;
       compiler->used_regs[reg] = 1;
       return reg;
@@ -472,8 +470,13 @@ orc_program_compile_full (OrcProgram *program, OrcTarget *target,
   program->orccode->code_size = compiler->codeptr - compiler->code;
   orc_code_allocate_codemem (program->orccode, program->orccode->code_size);
 
+#if defined(__APPLE__) && TARGET_OS_OSX
 #if defined(MAC_OS_VERSION_11_0) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_11_0
-  orc_pthread_jit_write_protect_np (0);
+  if (__builtin_available (macOS 11.0, *)) {
+    if (pthread_jit_write_protect_supported_np ())
+      pthread_jit_write_protect_np (0);
+  }
+#endif
 #endif
 #if defined(HAVE_CODEMEM_VIRTUALALLOC)
   /* Ensure that code region is writable before memcpy */
@@ -491,8 +494,15 @@ orc_program_compile_full (OrcProgram *program, OrcTarget *target,
     compiler->target->flush_cache (program->orccode);
   }
 
+#if defined(__APPLE__) && TARGET_OS_OSX
 #if defined(MAC_OS_VERSION_11_0) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_11_0
-  orc_pthread_jit_write_protect_np (1);
+  if (__builtin_available (macOS 11.0, *)) {
+    if (pthread_jit_write_protect_supported_np ()) {
+      pthread_jit_write_protect_np (1);
+      sys_icache_invalidate (program->orccode->exec, program->orccode->code_size);
+    }
+  }
+#endif
 #endif
 #if defined(HAVE_CODEMEM_VIRTUALALLOC)
   /* Code region is now ready for execution */
@@ -1028,8 +1038,9 @@ orc_compiler_global_reg_alloc (OrcCompiler *compiler)
 
   if (compiler->alloc_loop_counter && !compiler->error) {
     compiler->loop_counter = orc_compiler_allocate_register (compiler, FALSE);
-    /* FIXME massive hack */
-    if (compiler->loop_counter == 0) {
+    // FIXME: If loop_counter is invalid, the counter must be set manually
+    // in the executor 
+    if (compiler->loop_counter == ORC_REG_INVALID) {
       compiler->error = FALSE;
       compiler->result = ORC_COMPILE_RESULT_OK;
     }
