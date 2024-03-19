@@ -4,16 +4,19 @@ orc_sources = [
   'orccode.c',
   'orccodemem.c',
   'orccompiler.c',
+  'orccpu.c',
   'orcdebug.c',
   'orcemulateopcodes.c',
   'orcexecutor.c',
   'orcfunctions.c',
   'orconce.c',
-  'orcopcodes.c',
+  'orcopcode.c',
+  'orcopcodes-sys.c',
   'orcparse.c',
   'orcprogram.c',
   'orcprogram-c.c',
   'orcrule.c',
+  'orctarget.c',
   'orcutils.c',
 ]
 
@@ -27,7 +30,6 @@ orc_headers = [
   'orccompiler.h',
   'orcconstant.h',
   'orccpu.h',
-  'orccpuinsn.h',
   'orcdebug.h',
   'orcemulateopcodes.h', # FIXME: this probably shouldn't be installed, symbols are not exported or useful
   'orcexecutor.h',
@@ -54,20 +56,20 @@ orc_headers = [
 ]
 install_headers(orc_headers, subdir : 'orc-' + orc_api + '/orc')
 
+if 'avx' in enabled_backends or 'sse' in enabled_backends or 'mmx' in enabled_backends
+  orc_sources += ['orcx86.c', 'orcx86insn.c', 'orcprogram-x86.c']
+endif
+
 if 'avx' in enabled_backends
-  orc_sources += ['orcavx.c', 'orcrules-avx.c', 'orcprogram-avx.c',
-    'orcx86.c', 'orcx86insn.c']
+  orc_sources += ['orcavx.c', 'orcrules-avx.c', 'orcprogram-avx.c']
 endif
 
 if 'sse' in enabled_backends
-  orc_sources += ['orcsse.c', 'orcrules-sse.c', 'orcprogram-sse.c',
-    'orcx86.c', 'orcx86insn.c']
+  orc_sources += ['orcsse.c', 'orcrules-sse.c', 'orcprogram-sse.c']
 endif
 
 if 'mmx' in enabled_backends
-  # we assume it is ok to include the same file (orcx86) twice
-  # in case all backends are selected (ie mmx and sse)
-  orc_sources += ['orcmmx.c', 'orcrules-mmx.c', 'orcprogram-mmx.c', 'orcx86.c']
+  orc_sources += ['orcmmx.c', 'orcrules-mmx.c', 'orcprogram-mmx.c']
 endif
 
 if 'altivec' in enabled_backends
@@ -132,13 +134,3 @@ orc_dep = declare_dependency(include_directories : orc_inc,
                              dependencies : orc_dependencies,
                              compile_args : orc_dep_cargs,
                              link_with : orc_lib)
-
-executable ('generate-bytecode',
-  'generate-bytecode.c',
-  dependencies : orc_dep,
-  install : false)
-
-executable ('generate-emulation',
-  'generate-emulation.c',
-  dependencies : orc_dep,
-  install : false)

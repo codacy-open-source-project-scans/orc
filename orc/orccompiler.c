@@ -209,54 +209,6 @@ orc_compiler_allocate_register (OrcCompiler *compiler, int data_reg)
   return 0;
 }
 
-/**
- * orc_program_compile:
- * @program: the OrcProgram to compile
- *
- * Compiles an Orc program for the current CPU.  If successful,
- * executable code for the program was generated and can be
- * executed.
- *
- * The return value indicates various levels of success or failure.
- * Success can be determined by checking for a true value of the
- * macro ORC_COMPILE_RESULT_IS_SUCCESSFUL() on the return value.  This
- * indicates that executable code was generated.  If the macro
- * ORC_COMPILE_RESULT_IS_FATAL() on the return value evaluates to
- * true, then there was a syntactical error in the program.  If the
- * result is neither successful nor fatal, the program can still be
- * emulated.
- *
- * Returns: an OrcCompileResult
- */
-OrcCompileResult
-orc_program_compile (OrcProgram *program)
-{
-  return orc_program_compile_for_target (program, orc_target_get_default ());
-}
-
-/**
- * orc_program_compile_for_target:
- * @program: the OrcProgram to compile
- *
- * Compiles an Orc program for the given target, using the
- * default target flags for that target.
- *
- * Returns: an OrcCompileResult
- */
-OrcCompileResult
-orc_program_compile_for_target (OrcProgram *program, OrcTarget *target)
-{
-  unsigned int flags;
-
-  if (target) {
-    flags = target->get_default_flags ();
-  } else {
-    flags = 0;
-  }
-
-  return orc_program_compile_full (program, target, flags);
-}
-
 #if defined(HAVE_CODEMEM_VIRTUALALLOC)
 static orc_bool
 _set_virtual_protect (void * mem, size_t size, int code_protect)
@@ -285,20 +237,9 @@ _set_virtual_protect (void * mem, size_t size, int code_protect)
 }
 #endif
 
-/**
- * orc_program_compile_full:
- * @program: the OrcProgram to compile
- *
- * Compiles an Orc program for the given target, using the
- * given target flags.
- *
- * Returns: an OrcCompileResult
- */
 OrcCompileResult
-orc_program_compile_full (OrcProgram *program, OrcTarget *target,
-    unsigned int flags)
+orc_compiler_compile_program (OrcCompiler *compiler, OrcProgram *program, OrcTarget *target, unsigned int flags)
 {
-  OrcCompiler *compiler;
   int i;
   OrcCompileResult result;
   const char *error_msg;
@@ -321,9 +262,6 @@ orc_program_compile_full (OrcProgram *program, OrcTarget *target,
     program->asm_code = NULL;
   }
 
-  compiler = malloc (sizeof(OrcCompiler));
-  memset (compiler, 0, sizeof(OrcCompiler));
-
   if (program->backup_func) {
     program->code_exec = program->backup_func;
   } else {
@@ -335,17 +273,19 @@ orc_program_compile_full (OrcProgram *program, OrcTarget *target,
   compiler->target_flags = flags;
 
   {
-    ORC_LOG("variables");
+    ORC_LOG("Program variables");
     for(i=0;i<ORC_N_VARIABLES;i++){
       if (program->vars[i].size > 0) {
-        ORC_LOG("%d: %s size %d type %d alloc %d", i,
+        ORC_LOG("%d: %s size %d type %d alignment %d is_aligned %d alloc %d", i,
             program->vars[i].name,
             program->vars[i].size,
             program->vars[i].vartype,
+            program->vars[i].alignment,
+            program->vars[i].is_aligned,
             program->vars[i].alloc);
       }
     }
-    ORC_LOG("instructions");
+    ORC_LOG("Program instructions");
     for(i=0;i<program->n_insns;i++){
       ORC_LOG("%d: %s %d %d %d %d", i,
           program->insns[i].opcode->name,
@@ -384,23 +324,24 @@ orc_program_compile_full (OrcProgram *program, OrcTarget *target,
   orc_compiler_rewrite_vars (compiler);
   if (compiler->error) goto error;
 
-#if 0
   {
-    ORC_ERROR("variables");
+    ORC_LOG("Compiler variables");
     for(i=0;i<ORC_N_VARIABLES;i++){
       if (compiler->vars[i].size > 0) {
-        ORC_ERROR("%d: %s size %d type %d alloc %d [%d,%d]", i,
+        ORC_LOG("%d: %s size %d type %d alignment %d is_aligned %d alloc %d [%d,%d]", i,
             compiler->vars[i].name,
             compiler->vars[i].size,
             compiler->vars[i].vartype,
+            compiler->vars[i].alignment,
+            compiler->vars[i].is_aligned,
             compiler->vars[i].alloc,
             compiler->vars[i].first_use,
             compiler->vars[i].last_use);
       }
     }
-    ORC_ERROR("instructions");
+    ORC_LOG("Compiler instructions");
     for(i=0;i<compiler->n_insns;i++){
-      ORC_ERROR("%d: %s %d %d %d %d", i,
+      ORC_LOG("%d: %s %d %d %d %d", i,
           compiler->insns[i].opcode->name,
           compiler->insns[i].dest_args[0],
           compiler->insns[i].dest_args[1],
@@ -408,7 +349,6 @@ orc_program_compile_full (OrcProgram *program, OrcTarget *target,
           compiler->insns[i].src_args[1]);
     }
   }
-#endif
   program->orccode = orc_code_new ();
 
   program->orccode->is_2d = program->is_2d;

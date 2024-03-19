@@ -1,4 +1,3 @@
-
 #include "config.h"
 
 #include <stdio.h>
@@ -6,7 +5,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
-#include <orc/orccpu.h>
+#include <orc/orc.h>
 #include <orc/orcprogram.h>
 #include <orc/orcdebug.h>
 #include <orc/orcinternal.h>
@@ -32,6 +31,9 @@ orc_program_new (void)
 {
   OrcProgram *p;
 
+  /* FIXME: there's no need to do this. If we guard every API
+   * by having orc_init called before, we'll never end
+   */
   orc_init ();
 
   p = malloc(sizeof(OrcProgram));
@@ -738,9 +740,6 @@ void
 orc_program_set_var_alignment (OrcProgram *program, int var, int alignment)
 {
   program->vars[var].alignment = alignment;
-  if (program->vars[var].alignment >= 16) {
-    program->vars[var].is_aligned = TRUE;
-  }
 }
 
 void
@@ -1204,49 +1203,6 @@ orc_program_get_max_accumulator_size (OrcProgram *program)
   return max;
 }
 
-int _orc_data_cache_size_level1;
-int _orc_data_cache_size_level2;
-int _orc_data_cache_size_level3;
-int _orc_cpu_family;
-int _orc_cpu_model;
-int _orc_cpu_stepping;
-const char *_orc_cpu_name = "unknown";
-
-void
-orc_get_data_cache_sizes (int *level1, int *level2, int *level3)
-{
-  if (level1) {
-    *level1 = _orc_data_cache_size_level1;
-  }
-  if (level2) {
-    *level2 = _orc_data_cache_size_level2;
-  }
-  if (level3) {
-    *level3 = _orc_data_cache_size_level3;
-  }
-
-}
-
-void
-orc_get_cpu_family_model_stepping (int *family, int *model, int *stepping)
-{
-  if (family) {
-    *family = _orc_cpu_family;
-  }
-  if (model) {
-    *model = _orc_cpu_model;
-  }
-  if (stepping) {
-    *stepping = _orc_cpu_stepping;
-  }
-}
-
-const char *
-orc_get_cpu_name (void)
-{
-  return _orc_cpu_name;
-}
-
 void
 orc_program_reset (OrcProgram *program)
 {
@@ -1282,4 +1238,72 @@ orc_program_has_float (OrcCompiler *compiler)
     if (opcode->flags & ORC_STATIC_OPCODE_FLOAT) return TRUE;
   }
   return FALSE;
+}
+
+/**
+ * orc_program_compile:
+ * @program: the OrcProgram to compile
+ *
+ * Compiles an Orc program for the current CPU.  If successful,
+ * executable code for the program was generated and can be
+ * executed.
+ *
+ * The return value indicates various levels of success or failure.
+ * Success can be determined by checking for a true value of the
+ * macro ORC_COMPILE_RESULT_IS_SUCCESSFUL() on the return value.  This
+ * indicates that executable code was generated.  If the macro
+ * ORC_COMPILE_RESULT_IS_FATAL() on the return value evaluates to
+ * true, then there was a syntactical error in the program.  If the
+ * result is neither successful nor fatal, the program can still be
+ * emulated.
+ *
+ * Returns: an OrcCompileResult
+ */
+OrcCompileResult
+orc_program_compile (OrcProgram *program)
+{
+  return orc_program_compile_for_target (program, orc_target_get_default ());
+}
+
+/**
+ * orc_program_compile_for_target:
+ * @program: the OrcProgram to compile
+ *
+ * Compiles an Orc program for the given target, using the
+ * default target flags for that target.
+ *
+ * Returns: an OrcCompileResult
+ */
+OrcCompileResult
+orc_program_compile_for_target (OrcProgram *program, OrcTarget *target)
+{
+  unsigned int flags;
+
+  if (target) {
+    flags = target->get_default_flags ();
+  } else {
+    flags = 0;
+  }
+
+  return orc_program_compile_full (program, target, flags);
+}
+
+/**
+ * orc_program_compile_full:
+ * @program: the OrcProgram to compile
+ *
+ * Compiles an Orc program for the given target, using the
+ * given target flags.
+ *
+ * Returns: an OrcCompileResult
+ */
+OrcCompileResult
+orc_program_compile_full (OrcProgram *program, OrcTarget *target,
+    unsigned int flags)
+{
+  OrcCompiler *compiler;
+
+  compiler = malloc (sizeof(OrcCompiler));
+  memset (compiler, 0, sizeof(OrcCompiler));
+  return orc_compiler_compile_program (compiler, program, target, flags);
 }
